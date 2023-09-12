@@ -1,0 +1,94 @@
+version: "3.9"
+
+volumes:
+  postgres_data:
+  pgadmin4_data:
+
+networks:
+  network-backend:
+    driver: bridge
+  network-frontend:
+    driver: bridge
+
+services:
+  db:
+    image: docker.io/bitnami/postgresql:15
+    container_name: db
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRESQL_DATABASE: ${POSTGRES_DB}
+      POSTGRESQL_USERNAME: ${POSTGRES_USER}
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/bitnami/postgresql
+    networks:
+      - network-backend
+
+  pgadmin4:
+    image: docker.io/dpage/pgadmin4
+    container_name: pgadmin4
+    ports:
+      - "15432:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+    volumes:
+      - pgadmin4_data:/var/lib/pgadmin
+    depends_on:
+      - db
+    networks:
+      - network-backend
+
+  web:
+    image: web
+    container_name: web
+    build:
+      context: ./docker-compose/nginx
+      args:
+        - CHANGE_SOURCE=${CHANGE_SOURCE}
+        - PHP_UPSTREAM_CONTAINER=${PHP_UPSTREAM_CONTAINER}
+        - PHP_UPSTREAM_PORT=${PHP_UPSTREAM_PORT}
+        - http_proxy
+        - https_proxy
+        - no_proxy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "81:81"
+    volumes:
+      - ./src:/var/www
+      - ./docker-compose/nginx/log/:/var/log/nginx
+      - ./docker-compose/nginx/sites/:/etc/nginx/sites-available
+      - ./docker-compose/nginx/ssl/:/etc/nginx/ssl
+    networks:
+      - network-frontend
+    depends_on:
+      - php
+
+  php:
+    build:
+      context: .
+      dockerfile: Dockerfile.php.dev
+    image: php
+    container_name: php
+    working_dir: /var/www/app
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      XDEBUG_MODE: ${XDEBUG_MODE:-off}
+    volumes:
+      - ./src:/var/www
+      - ./docker-compose/php/php.ini:/opt/docker/etc/php/php.ini
+      - ./docker-compose/php/supervisor.conf:/opt/docker/etc/supervisor.conf
+      - ./docker-compose/php/supervisor.d/:/custom/supervisor.d
+    networks:
+      - network-backend
+      - network-frontend
+    depends_on:
+      - db
+    extra_hosts:
+      - host.docker.internal:host-gateway
